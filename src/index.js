@@ -7,11 +7,12 @@ import authRoutes from './routes/auth.js';
 
 const app = express();
 const PORT = process.env.PORT || 5000;
-const FRONTEND_ORIGIN = process.env.FRONTEND_ORIGIN || 'http://localhost:5173';
 
+// Allow credentials and dynamically reflect the requesting origin.
+// This avoids CORS issues when frontend is deployed on a different domain.
 app.use(
   cors({
-    origin: FRONTEND_ORIGIN,
+    origin: true,
     credentials: true,
   })
 );

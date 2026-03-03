@@ -8,8 +8,10 @@ const SALT_ROUNDS = 10;
 const COOKIE_NAME = 'auth_token';
 const COOKIE_OPTS = {
   httpOnly: true,
-  secure: process.env.NODE_ENV === 'production',
-  sameSite: 'lax',
+  // For cross-site requests between frontend and backend domains,
+  // SameSite must be 'none' and cookies must be secure.
+  secure: true,
+  sameSite: 'none',
   maxAge: 7 * 24 * 60 * 60 * 1000,
 };
 
@@ -90,8 +92,8 @@ router.post('/login', async (req, res) => {
 router.post('/logout', (req, res) => {
   res.clearCookie(COOKIE_NAME, {
     httpOnly: true,
-    secure: process.env.NODE_ENV === 'production',
-    sameSite: 'lax',
+    secure: true,
+    sameSite: 'none',
   });
   return res.status(200).json({ message: 'Logged out.' });
 });

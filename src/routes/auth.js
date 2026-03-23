@@ -54,8 +54,8 @@ router.post('/register', async (req, res) => {
 
     try {
       await pool.execute(
-        'INSERT INTO users (username, email, phone, password, role) VALUES (?, ?, ?, ?, ?)',
-        [username.trim(), email.trim(), phone.trim(), hashedPassword, 'USER']
+        'INSERT INTO users (username, email, phone, password_hash, role, name) VALUES (?, ?, ?, ?, ?, ?)',
+        [username.trim(), email.trim(), phone.trim(), hashedPassword, 'USER', username.trim()]
       );
     } catch (err) {
       console.error('Register DB error:', err);
@@ -87,7 +87,7 @@ router.post('/login', async (req, res) => {
     let rows;
     try {
       const result = await pool.execute(
-        'SELECT id, username, password, role FROM users WHERE username = ?',
+        'SELECT id, username, password_hash, role FROM users WHERE username = ?',
         [username.trim()]
       );
       rows = result[0];
@@ -106,7 +106,7 @@ router.post('/login', async (req, res) => {
       passwordOk = false;
     } else {
       try {
-        passwordOk = await bcrypt.compare(password, user.password);
+        passwordOk = await bcrypt.compare(password, user.password_hash);
       } catch (err) {
         console.error('Password compare error:', err);
         return res.status(500).json({

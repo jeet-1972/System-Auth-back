@@ -40,12 +40,31 @@ router.post('/register', async (req, res) => {
       return res.status(400).json({ error: 'Password must be at least 6 characters.' });
     }
 
-    const hashedPassword = await bcrypt.hash(password, SALT_ROUNDS);
+    let hashedPassword;
+    try {
+      hashedPassword = await bcrypt.hash(password, SALT_ROUNDS);
+    } catch (err) {
+      console.error('Password hash error:', err);
+      return res.status(500).json({
+        error: 'Password hashing failed.',
+        step: 'hash',
+        code: err?.code || err?.name || 'HASH_ERROR',
+      });
+    }
 
-    await pool.execute(
-      'INSERT INTO users (username, email, phone, password, role) VALUES (?, ?, ?, ?, ?)',
-      [username.trim(), email.trim(), phone.trim(), hashedPassword, 'USER']
-    );
+    try {
+      await pool.execute(
+        'INSERT INTO users (username, email, phone, password, role) VALUES (?, ?, ?, ?, ?)',
+        [username.trim(), email.trim(), phone.trim(), hashedPassword, 'USER']
+      );
+    } catch (err) {
+      console.error('Register DB error:', err);
+      return res.status(500).json({
+        error: 'Database insert failed.',
+        step: 'db',
+        code: err?.code || err?.name || 'DB_INSERT_ERROR',
+      });
+    }
 
     return res.status(201).json({ message: 'Register success' });
   } catch (err) {
@@ -65,21 +84,58 @@ router.post('/login', async (req, res) => {
       return res.status(400).json({ error: 'Username and password are required.' });
     }
 
-    const [rows] = await pool.execute(
-      'SELECT id, username, password, role FROM users WHERE username = ?',
-      [username.trim()]
-    );
+    let rows;
+    try {
+      const result = await pool.execute(
+        'SELECT id, username, password, role FROM users WHERE username = ?',
+        [username.trim()]
+      );
+      rows = result[0];
+    } catch (err) {
+      console.error('Login DB error:', err);
+      return res.status(500).json({
+        error: 'Database lookup failed.',
+        step: 'db',
+        code: err?.code || err?.name || 'DB_LOOKUP_ERROR',
+      });
+    }
 
     const user = rows[0];
-    if (!user || !(await bcrypt.compare(password, user.password))) {
+    let passwordOk = false;
+    if (!user) {
+      passwordOk = false;
+    } else {
+      try {
+        passwordOk = await bcrypt.compare(password, user.password);
+      } catch (err) {
+        console.error('Password compare error:', err);
+        return res.status(500).json({
+          error: 'Password compare failed.',
+          step: 'hash',
+          code: err?.code || err?.name || 'HASH_COMPARE_ERROR',
+        });
+      }
+    }
+
+    if (!user || !passwordOk) {
       return res.status(401).json({ error: 'Invalid credentials.' });
     }
 
-    const token = jwt.sign(
-      { sub: user.username, role: user.role },
-      process.env.JWT_SECRET,
-      { algorithm: 'HS256', expiresIn: '7d' }
-    );
+    let token;
+    try {
+      token = jwt.sign(
+        { sub: user.username, role: user.role },
+        process.env.JWT_SECRET,
+        { algorithm: 'HS256', expiresIn: '7d' }
+      );
+    } catch (err) {
+      console.error('JWT sign error:', err);
+      return res.status(500).json({
+        error: 'JWT generation failed.',
+        step: 'jwt',
+        code: err?.code || err?.name || 'JWT_SIGN_ERROR',
+      });
+    }
 
     res.cookie(COOKIE_NAME, token, COOKIE_OPTS);
     return res.status(200).json({ message: 'Login successful' });

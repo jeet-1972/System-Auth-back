@@ -23,6 +23,57 @@ function validatePhone(phone) {
   return /^[\d\s\-+()]{8,}$/.test(phone);
 }
 
+async function insertUserCompat({ username, email, phone, hashedPassword }) {
+  try {
+    await pool.execute(
+      'INSERT INTO users (username, email, phone, password_hash, role, name) VALUES (?, ?, ?, ?, ?, ?)',
+      [username, email, phone, hashedPassword, 'USER', username]
+    );
+    return;
+  } catch (err) {
+    // Fallback for legacy schemas that still use `password` instead of `password_hash`.
+    if (err?.code !== 'ER_BAD_FIELD_ERROR') {
+      throw err;
+    }
+  }
+
+  try {
+    await pool.execute(
+      'INSERT INTO users (username, email, phone, password, role, name) VALUES (?, ?, ?, ?, ?, ?)',
+      [username, email, phone, hashedPassword, 'USER', username]
+    );
+  } catch (err) {
+    // Older legacy schema may not include `name`.
+    if (err?.code !== 'ER_BAD_FIELD_ERROR') {
+      throw err;
+    }
+    await pool.execute(
+      'INSERT INTO users (username, email, phone, password, role) VALUES (?, ?, ?, ?, ?)',
+      [username, email, phone, hashedPassword, 'USER']
+    );
+  }
+}
+
+async function fetchUserForLoginCompat(username) {
+  try {
+    const [rows] = await pool.execute(
+      'SELECT id, username, password_hash AS pass_hash, role FROM users WHERE username = ?',
+      [username]
+    );
+    return rows;
+  } catch (err) {
+    if (err?.code !== 'ER_BAD_FIELD_ERROR') {
+      throw err;
+    }
+  }
+
+  const [rows] = await pool.execute(
+    'SELECT id, username, password AS pass_hash, role FROM users WHERE username = ?',
+    [username]
+  );
+  return rows;
+}
+
 router.post('/register', async (req, res) => {
   try {
     const { username, email, phone, password } = req.body;
@@ -53,10 +104,12 @@ router.post('/register', async (req, res) => {
     }
 
     try {
-      await pool.execute(
-        'INSERT INTO users (username, email, phone, password_hash, role, name) VALUES (?, ?, ?, ?, ?, ?)',
-        [username.trim(), email.trim(), phone.trim(), hashedPassword, 'USER', username.trim()]
-      );
+      await insertUserCompat({
+        username: username.trim(),
+        email: email.trim(),
+        phone: phone.trim(),
+        hashedPassword,
+      });
     } catch (err) {
       console.error('Register DB error:', err);
       return res.status(500).json({
@@ -86,11 +139,7 @@ router.post('/login', async (req, res) => {
 
     let rows;
     try {
-      const result = await pool.execute(
-        'SELECT id, username, password_hash, role FROM users WHERE username = ?',
-        [username.trim()]
-      );
-      rows = result[0];
+      rows = await fetchUserForLoginCompat(username.trim());
     } catch (err) {
       console.error('Login DB error:', err);
       return res.status(500).json({
@@ -106,7 +155,7 @@ router.post('/login', async (req, res) => {
       passwordOk = false;
     } else {
       try {
-        passwordOk = await bcrypt.compare(password, user.password_hash);
+        passwordOk = await bcrypt.compare(password, user.pass_hash);
       } catch (err) {
         console.error('Password compare error:', err);
         return res.status(500).json({

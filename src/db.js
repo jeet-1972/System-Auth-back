@@ -31,6 +31,28 @@ export async function initDb() {
   const conn = await pool.getConnection();
   try {
     await conn.query(CREATE_USERS_TABLE);
+    // Best-effort compatibility migrations for existing legacy schemas.
+    const tryQuery = async (sql) => {
+      try {
+        await conn.query(sql);
+      } catch (err) {
+        // Ignore unsupported syntax for IF NOT EXISTS and duplicate-column cases.
+        const ignorable = ['ER_DUP_FIELDNAME', 'ER_PARSE_ERROR', 'ER_BAD_FIELD_ERROR'];
+        if (!ignorable.includes(err?.code)) {
+          throw err;
+        }
+      }
+    };
+
+    await tryQuery('ALTER TABLE users ADD COLUMN IF NOT EXISTS password_hash VARCHAR(255) NULL');
+    await tryQuery("ALTER TABLE users ADD COLUMN IF NOT EXISTS role VARCHAR(50) NOT NULL DEFAULT 'USER'");
+    await tryQuery('ALTER TABLE users ADD COLUMN IF NOT EXISTS created_at TIMESTAMP NULL DEFAULT CURRENT_TIMESTAMP');
+    await tryQuery('ALTER TABLE users ADD COLUMN IF NOT EXISTS name VARCHAR(255) NULL');
+    await tryQuery(
+      'ALTER TABLE users ADD COLUMN IF NOT EXISTS updated_at DATETIME(6) NOT NULL DEFAULT CURRENT_TIMESTAMP(6) ON UPDATE CURRENT_TIMESTAMP(6)'
+    );
+    // If a legacy `password` column exists, backfill password_hash once.
+    await tryQuery('UPDATE users SET password_hash = password WHERE password_hash IS NULL AND password IS NOT NULL');
   } finally {
     conn.release();
   }
